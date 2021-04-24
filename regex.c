@@ -101,6 +101,14 @@ void parse(char *r) {
 	}
 }
 
+void free_states(state_t *s) {
+	if (!s) return;
+	printf("free ");
+	free_states(s->out);
+	free_states(s->out1);
+	free(s);
+}
+
 void follow(state_t *s) {
 	if (!s) return;
 	printf("%p -> (%c; out: %p; out: %p)\n", 
@@ -114,7 +122,9 @@ void debug() {
 	printf("op_stack: %ld\n", op_ptr-op_stack);
 	fragment_t f = POP_OUT();
 	follow(f.s);
+	free_states(f.s);
 }
+
 
 /*
 
