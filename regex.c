@@ -14,6 +14,8 @@
 static fragment_t *out_ptr, out_stack[1000];
 static int_fast8_t *op_ptr, op_stack[1000];
 
+static bool no_concat = false;
+
 state_t *new_state(int_fast8_t sym, state_t *o, state_t *o1) {
 	state_t *s = malloc(sizeof(*s));
 	s->sym = sym;
@@ -50,7 +52,7 @@ void patch(out_list_t *l, state_t *out) {
 	}
 }
 
-void add_char(char c, bool no_concat) {
+void add_char(char c) {
 	if (no_concat || out_ptr == out_stack) {
 		// TODO
 	} else PUSH_OP(OP_CONCAT);
@@ -67,7 +69,6 @@ void parse(char *r) {
 	if (!*r) return;
 	++r;
 	char c;
-	bool no_concat = false;
 	while ((c = *r++)) {
 		switch (c) {
 		case '/':
@@ -78,12 +79,11 @@ void parse(char *r) {
 				int8_t op = POP_OP();
 				if (op == OP_CONCAT) {
 					printf("concat\n");
-					fragment_t f1 = POP_OUT();
 					fragment_t f2 = POP_OUT();
+					fragment_t f1 = POP_OUT();
 					patch(f1.out, f2.s);
 					PUSH_OUT(new_frag(f1.s, f2.out));
 				} else printf("error %d\n", op);
-				getchar();
 			}
 			return;
 		case '(':
@@ -94,18 +94,27 @@ void parse(char *r) {
 		case '?':
 			break;
 		default: // is alpha or num
-			add_char(c, no_concat);
+			add_char(c);
 			no_concat = false;
 			break;
 		}
 	}
 }
 
+void follow(state_t *s) {
+	if (!s) return;
+	printf("%p -> (%c; out: %p; out: %p)\n", 
+		(void*)s, s->sym, (void *)s->out, (void *)s->out1);
+	follow(s->out);
+	follow(s->out1);
+}
+
 void debug() {
 	printf("out_stack: %ld\n", out_ptr-out_stack);
 	printf("op_stack: %ld\n", op_ptr-op_stack);
+	fragment_t f = POP_OUT();
+	follow(f.s);
 }
-
 
 /*
 
