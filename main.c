@@ -10,8 +10,8 @@ int main(int argc, char **argv) {
 		exit(EXIT_FAILURE);
 	}
 
-	parse(argv[2]);
-	debug();
+	regex_t *reg = create_regex(argv[2]);
+	delete_regex(reg);
 
 	exit(EXIT_SUCCESS);
 }

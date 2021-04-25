@@ -5,6 +5,29 @@
 #include <stdlib.h>
 #include "regex.h"
 
+enum OP {
+	OP_MATCH = -1,
+	OP_SPLIT = -2,
+	OP_CONCAT = -3
+};
+
+union out_list {
+	state_t *s;
+	out_list_t *next;
+};
+
+struct state {
+	int_fast8_t sym;
+	state_t *out;
+	state_t *out1;
+	unsigned listid;
+};
+
+struct fragment {
+	state_t *s;
+	out_list_t *out;
+};
+
 #define PUSH_OUT(x) *out_ptr++ = x
 #define POP_OUT() *(--out_ptr)
 
@@ -14,7 +37,12 @@
 static fragment_t *out_ptr, out_stack[1000];
 static int_fast8_t *op_ptr, op_stack[1000];
 
-static bool no_concat = false;
+static bool no_concat;
+
+bool validate(char *r){
+	// TODO
+	return true;
+}
 
 state_t *new_state(int_fast8_t sym, state_t *o, state_t *o1) {
 	state_t *s = malloc(sizeof(*s));
@@ -62,6 +90,7 @@ void add_char(char c) {
 }
 
 void parse(char *r) {
+	no_concat = false;
 	out_ptr = out_stack;
 	op_ptr = op_stack;
 
@@ -109,10 +138,30 @@ void free_states(state_t *s) {
 	free(s);
 }
 
+regex_t *create_regex(char *r) {
+	if (!validate(r)) return NULL;
+	parse(r);
+	debug();
+	regex_t *reg = malloc(sizeof(*reg));
+	reg->s = out_stack->s;
+	reg->out = out_stack->out;
+	return reg;
+}
+
+void delete_regex(regex_t *r) {
+	if (!r) return;
+	free_states(r->s);
+	free(r);
+}
+
+// debugging section
+
 void follow(state_t *s) {
 	if (!s) return;
-	printf("%p -> (%c; out: %p; out: %p)\n", 
+	printf("\t%p -> (%c; out: %p; out1: %p)\n", 
 		(void*)s, s->sym, (void *)s->out, (void *)s->out1);
+	printf("\t\taddr out: %p; addr out1: %p\n", 
+		(void*)&s->out, (void*)&s->out1);
 	follow(s->out);
 	follow(s->out1);
 }
@@ -121,10 +170,10 @@ void debug() {
 	printf("out_stack: %ld\n", out_ptr-out_stack);
 	printf("op_stack: %ld\n", op_ptr-op_stack);
 	fragment_t f = POP_OUT();
-	follow(f.s);
-	free_states(f.s);
-}
 
+	printf("fragment: s: %p; out %p\n", (void*)f.s, (void*)f.out);
+	follow(f.s);
+}
 
 /*
 
