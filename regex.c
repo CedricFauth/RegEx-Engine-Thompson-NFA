@@ -108,7 +108,7 @@ void add_char(char c) {
 
 /*
 
-/ab(c+d*|ef)/
+/a|(bc)/
 
 */
 
@@ -134,6 +134,7 @@ void merge() {
 		printf("final state: %p\n", (void*)s);
 		patch(f1.out, s);
 		PUSH_OUT(new_frag(f1.s, NULL));
+		break;
 	case OP_CONCAT:
 		printf("OP_CONCAT\n");
 		f2 = POP_OUT();
@@ -145,12 +146,6 @@ void merge() {
 		printf("OP_OR\n");
 		f2 = POP_OUT();
 		f1 = POP_OUT();
-
-		printf("\nf1: ");
-		print_frag(&f1);
-		printf("\nf2: ");
-		print_frag(&f2);
-
 		s = new_state(OP_OR, f1.s, f2.s);
 		PUSH_OUT(new_frag(s, append(f1.out, f2.out)));
 		break;
@@ -170,7 +165,7 @@ void check_precedence(int8_t operator) {
 void parse(char *r) {
 	if (!*r++) return; // *r != '\0' and r = r+1
 	
-	no_concat = false;
+	no_concat = true; // beginning: no concatination required
 	out_ptr = out_stack;
 	op_ptr = op_stack;
 
@@ -187,12 +182,18 @@ void parse(char *r) {
 			merge();
 			return;
 		case '(':
-			// TODO
+			if (!no_concat) // no binary op before
+				PUSH_OP(OP_CONCAT);
+			PUSH_OP(OP_OPEN_P);
 			no_concat = true;
 			break;
 		case ')':
-			// TODO
-			PUSH_OP(OP_CONCAT);
+			check_precedence(OP_CLOSE_P);
+			if (PEEK_OP() == OP_OPEN_P) POP_OP();
+			else {
+				fprintf(stderr, "No '(' for ')' detected\n");
+				return;
+			}
 			break;
 		case '|':
 			check_precedence(OP_OR);
