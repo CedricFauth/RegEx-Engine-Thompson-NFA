@@ -10,14 +10,22 @@ enum OP {
 	// merge if last > current
 
 	OP_MATCH= 	-1,		// matches
-	OP_ZORM= 	-5,		// 	*	zero or more	
-	OP_OORM= 	-5,		// 	+	one or more
+	OP_ZORM= 	-3,		// 	*	zero or more	
+	OP_OORM= 	-4,		// 	+	one or more
 	OP_ZORO= 	-5,		// 	?	zero or one
 	OP_CONCAT=	-10,	// 	ab 	concatination
 	OP_OR=	 	-15,	// 	| 	or
 	OP_OPEN_P= 	-50,	// 	(
-	OP_CLOSE_P=	-50		//	)
+	OP_CLOSE_P=	-51		//	)
 };
+
+int8_t precedence(int8_t op) {
+	if (op == -1) return -1;			// match
+	else if (op >= OP_ZORO) return 5;	// * + ?
+	else if (op == OP_CONCAT) return 4;	// concat
+	else if (op == OP_OR) return 3;		// |
+	else return 1;						// ()
+}
 
 union out_list {
 	state_t *s;
@@ -149,14 +157,34 @@ void merge() {
 		s = new_state(OP_OR, f1.s, f2.s);
 		PUSH_OUT(new_frag(s, append(f1.out, f2.out)));
 		break;
+	case OP_OORM:
+		printf("OP_OORM +\n");
+		f1 = POP_OUT();
+		s = new_state(OP_OORM, f1.s, NULL);
+		patch(f1.out, s);
+		PUSH_OUT(new_frag(f1.s, new_list(&s->out1)));
+		break;
+	case OP_ZORM:
+		printf("OP_ZORM *\n");
+		f1 = POP_OUT();
+		s = new_state(OP_ZORM, f1.s, NULL);
+		patch(f1.out, s);
+		PUSH_OUT(new_frag(s, new_list(&s->out1)));
+		break;
+	case OP_ZORO:
+		printf("OP_ZORO ?\n");
+		f1 = POP_OUT();
+		s = new_state(OP_ZORO, f1.s, NULL);
+		PUSH_OUT(new_frag(s, append(f1.out, new_list(&s->out1))));
+		break;
 	default:
 		fprintf(stderr, "error: merge op not found: %d\n", last_op);
 		break;
 	}
 }
 
-void check_precedence(int8_t operator) {
-	while (op_ptr != op_stack && PEEK_OP() > operator) {
+void check_precedence(int8_t op) {
+	while (op_ptr != op_stack && precedence(PEEK_OP()) > precedence(op)) {
 		printf("merge: %d\n", PEEK_OP());
 		merge();
 	}
@@ -194,14 +222,27 @@ void parse(char *r) {
 				fprintf(stderr, "No '(' for ')' detected\n");
 				return;
 			}
+			no_concat = false;
 			break;
 		case '|':
 			check_precedence(OP_OR);
 			PUSH_OP(OP_OR);
 			no_concat = true;
+			break;
 		case '+':
+			check_precedence(OP_OORM);
+			PUSH_OP(OP_OORM);
+			no_concat = false;
+			break;
 		case '*':
+			check_precedence(OP_ZORM);
+			PUSH_OP(OP_ZORM);
+			no_concat = false;
+			break;
 		case '?':
+			check_precedence(OP_ZORO);
+			PUSH_OP(OP_ZORO);
+			no_concat = false;
 			break;
 		default: // is alpha or num
 			if (!isalnum(c)) {
@@ -250,7 +291,9 @@ void follow(state_t *s) {
 		(void*)s, s->sym, (void *)s->out, (void *)s->out1);
 	printf("\t\taddr out: %p; addr out1: %p\n", 
 		(void*)&s->out, (void*)&s->out1);
-	follow(s->out);
+	
+	if(s->sym != OP_ZORM 		// otherwise endless recursion
+		&& s-> sym != OP_OORM) follow(s->out); 
 	follow(s->out1);
 }
 
