@@ -6,9 +6,17 @@
 #include "regex.h"
 
 enum OP {
-	OP_MATCH = -1,
-	OP_SPLIT = -2,
-	OP_CONCAT = -3
+	// + = * = ? > AND > |
+	// merge if last > current
+
+	OP_MATCH= 	-1,		// matches
+	OP_ZORM= 	-5,		// 	*	zero or more	
+	OP_OORM= 	-5,		// 	+	one or more
+	OP_ZORO= 	-5,		// 	?	zero or one
+	OP_CONCAT=	-10,	// 	ab 	concatination
+	OP_OR=	 	-15,	// 	| 	or
+	OP_OPEN_P= 	-50,	// 	(
+	OP_CLOSE_P=	-50		//	)
 };
 
 union out_list {
@@ -71,7 +79,7 @@ out_list_t *new_list(state_t **s) {
 	return l;
 }
 
-out_list_t *merge(out_list_t *l1, out_list_t *l2) {
+out_list_t *append(out_list_t *l1, out_list_t *l2) {
 	out_list_t *new = l1;
 	while (l1->next) l1 = l1->next;
 	l1->next = l2;
@@ -93,6 +101,16 @@ void add_char(char c) {
 	//
 	state_t *s = new_state(c, NULL, NULL);
 	PUSH_OUT(new_frag(s, new_list(&s->out)));
+}
+
+/*
+
+/ab(c+d*|ef)/
+
+*/
+
+void merge(int8_t operator) {
+
 }
 
 void parse(char *r) {
@@ -123,11 +141,18 @@ void parse(char *r) {
 		case '(':
 		case ')':
 		case '|':
+			merge(OP_OR);
+			PUSH_OP(OP_OR);
+			no_concat = true;
 		case '+':
 		case '*':
 		case '?':
 			break;
 		default: // is alpha or num
+			if (!isalnum(c)) {
+				fprintf(stderr, "warning: unknown symbol: '%c'\n", c);
+				break;
+			};
 			add_char(c);
 			no_concat = false;
 			break;
@@ -207,7 +232,7 @@ ab(1|21+)?/
 op_s  :
 out_s :a->b->1|(21+)?
 
-Klammer: alles löschen bis Klammer + push(.)
+Klammer: auf: kein . danach; zu: alles löschen bis Klammer + push(.)
 Buchstabe: 	wenn letzter push operator war: nur hinzufügen
 			sonst push(.) und hinzufügen
 Operator: | -> davor .*? ausführen
