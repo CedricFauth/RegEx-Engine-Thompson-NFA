@@ -28,19 +28,25 @@ struct fragment {
 	out_list_t *out;
 };
 
-#define PUSH_OUT(x) *out_ptr++ = x
-#define POP_OUT() *(--out_ptr)
-
-#define PUSH_OP(x) *op_ptr++ = x
-#define POP_OP() *(--op_ptr)
-
 static fragment_t *out_ptr, out_stack[1000];
 static int_fast8_t *op_ptr, op_stack[1000];
 
 static bool no_concat;
 
+#define PUSH_OUT(x) *out_ptr++ = x
+#define POP_OUT() *(--out_ptr)
+#define PUSH_OP(x) *op_ptr++ = x
+#define POP_OP() *(--op_ptr)
+
 bool validate(char *r){
-	// TODO
+	char *tmp = r;
+	if (*r != '/') return false; 	// regex starts with '/'
+	if (*++r == '/') return false; 	// regex is not "//"
+	++r;
+	while (*r && (*r != '/' || *(r-1) == '\\')) ++r; // go to next '/'; ignore '\/'
+	if (!*r) return false;			// pos not '\0' but '/'
+	if (*(r+1)) return false;		// next pos is end '\0'
+	printf("found regex of len: %ld\n", r-tmp-1);
 	return true;
 }
 
@@ -90,13 +96,12 @@ void add_char(char c) {
 }
 
 void parse(char *r) {
+	if (!*r++) return; // *r != '\0' and r = r+1
+	
 	no_concat = false;
 	out_ptr = out_stack;
 	op_ptr = op_stack;
 
-	while (*r && *r != '/') ++r;
-	if (!*r) return;
-	++r;
 	char c;
 	while ((c = *r++)) {
 		switch (c) {
@@ -139,7 +144,10 @@ void free_states(state_t *s) {
 }
 
 regex_t *create_regex(char *r) {
-	if (!validate(r)) return NULL;
+	if (!validate(r)) {
+		fprintf(stderr, "error: regex not valid.\n");
+		return NULL;
+	} 
 	parse(r);
 	debug();
 	regex_t *reg = malloc(sizeof(*reg));
@@ -171,7 +179,13 @@ void debug() {
 	printf("op_stack: %ld\n", op_ptr-op_stack);
 	fragment_t f = POP_OUT();
 
-	printf("fragment: s: %p; out %p\n", (void*)f.s, (void*)f.out);
+	printf("fragment: s: %p; outlist", (void*)f.s);
+	out_list_t *next, *curr = f.out;
+	for (;curr;curr=next){
+		next = curr->next;
+		printf("->%p", (void*)curr);
+	}
+	printf("\n");
 	follow(f.s);
 }
 
