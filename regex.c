@@ -42,9 +42,10 @@ static int_fast8_t *op_ptr, op_stack[1000];
 static bool no_concat;
 
 #define PUSH_OUT(x) *out_ptr++ = x
-#define POP_OUT() *(--out_ptr)
+#define POP_OUT() *--out_ptr
 #define PUSH_OP(x) *op_ptr++ = x
-#define POP_OP() *(--op_ptr)
+#define POP_OP() *--op_ptr
+#define PEEK_OP() *(op_ptr-1)
 
 bool validate(char *r){
 	char *tmp = r;
@@ -91,12 +92,14 @@ void patch(out_list_t *l, state_t *out) {
 	for (; l; l=next) {
 		next = l->next;
 		l->s = out;
+		printf("patching out %p to %p\n", (void*)&l->s, (void*)out);
+		printf("now patched to %p\n", (void*)l->s);
 	}
 }
 
 void add_char(char c) {
 	if (no_concat || out_ptr == out_stack) {
-		// TODO
+		printf("\nno_concat add_char\n");
 	} else PUSH_OP(OP_CONCAT);
 	//
 	state_t *s = new_state(c, NULL, NULL);
@@ -109,8 +112,59 @@ void add_char(char c) {
 
 */
 
-void merge(int8_t operator) {
+void print_frag(fragment_t *f) {
+	printf("print_frag: s: %p; outlist", (void*)f->s);
+	out_list_t *next, *curr = f->out;
+	for (;curr;curr=next){
+		next = curr->next;
+		printf("->%p", (void*)curr);
+	}
+	
+}
 
+void merge() {
+	for (int i = 0; i < 10; ++i) printf("%d ", op_stack[i]);
+	int8_t last_op = POP_OP();
+	state_t *s;
+	fragment_t f1, f2;
+	switch (last_op) {
+	case OP_MATCH:
+		f1 = POP_OUT();
+		s = new_state(OP_MATCH, NULL, NULL);
+		printf("final state: %p\n", (void*)s);
+		patch(f1.out, s);
+		PUSH_OUT(new_frag(f1.s, NULL));
+	case OP_CONCAT:
+		printf("OP_CONCAT\n");
+		f2 = POP_OUT();
+		f1 = POP_OUT();
+		patch(f1.out, f2.s);
+		PUSH_OUT(new_frag(f1.s, f2.out));
+		break;
+	case OP_OR:
+		printf("OP_OR\n");
+		f2 = POP_OUT();
+		f1 = POP_OUT();
+
+		printf("\nf1: ");
+		print_frag(&f1);
+		printf("\nf2: ");
+		print_frag(&f2);
+
+		s = new_state(OP_OR, f1.s, f2.s);
+		PUSH_OUT(new_frag(s, append(f1.out, f2.out)));
+		break;
+	default:
+		fprintf(stderr, "error: merge op not found: %d\n", last_op);
+		break;
+	}
+}
+
+void check_precedence(int8_t operator) {
+	while (op_ptr != op_stack && PEEK_OP() > operator) {
+		printf("merge: %d\n", PEEK_OP());
+		merge();
+	}
 }
 
 void parse(char *r) {
@@ -124,24 +178,24 @@ void parse(char *r) {
 	while ((c = *r++)) {
 		switch (c) {
 		case '/':
-			while (op_ptr != op_stack) {
-				for (int i = 0; i < 5; ++i) printf("%d ", op_stack[i]);
-
-				printf("%ld\n", op_ptr-op_stack);
-				int8_t op = POP_OP();
-				if (op == OP_CONCAT) {
-					printf("concat\n");
-					fragment_t f2 = POP_OUT();
-					fragment_t f1 = POP_OUT();
-					patch(f1.out, f2.s);
-					PUSH_OUT(new_frag(f1.s, f2.out));
-				} else printf("error %d\n", op);
+			while (op_ptr != op_stack) merge();
+			if (out_ptr-out_stack != 1) {
+				fprintf(stderr, "error: more than one fragment at end\n");
+				return;
 			}
+			PUSH_OP(OP_MATCH);
+			merge();
 			return;
 		case '(':
+			// TODO
+			no_concat = true;
+			break;
 		case ')':
+			// TODO
+			PUSH_OP(OP_CONCAT);
+			break;
 		case '|':
-			merge(OP_OR);
+			check_precedence(OP_OR);
 			PUSH_OP(OP_OR);
 			no_concat = true;
 		case '+':
@@ -150,7 +204,7 @@ void parse(char *r) {
 			break;
 		default: // is alpha or num
 			if (!isalnum(c)) {
-				fprintf(stderr, "warning: unknown symbol: '%c'\n", c);
+				fprintf(stderr, "warning: ignoring unknown symbol: '%c'\n", c);
 				break;
 			};
 			add_char(c);
@@ -160,25 +214,25 @@ void parse(char *r) {
 	}
 }
 
-void free_states(state_t *s) {
-	if (!s) return;
-	printf("free ");
-	free_states(s->out);
-	free_states(s->out1);
-	free(s);
-}
-
 regex_t *create_regex(char *r) {
+
 	if (!validate(r)) {
 		fprintf(stderr, "error: regex not valid.\n");
 		return NULL;
-	} 
+	}
 	parse(r);
-	debug();
+
 	regex_t *reg = malloc(sizeof(*reg));
 	reg->s = out_stack->s;
 	reg->out = out_stack->out;
+
+	debug(reg);
+
 	return reg;
+}
+
+void free_states(state_t *s) {
+	// TODO
 }
 
 void delete_regex(regex_t *r) {
@@ -191,7 +245,7 @@ void delete_regex(regex_t *r) {
 
 void follow(state_t *s) {
 	if (!s) return;
-	printf("\t%p -> (%c; out: %p; out1: %p)\n", 
+	printf("\t%p -> (%d; out: %p; out1: %p)\n", 
 		(void*)s, s->sym, (void *)s->out, (void *)s->out1);
 	printf("\t\taddr out: %p; addr out1: %p\n", 
 		(void*)&s->out, (void*)&s->out1);
@@ -199,19 +253,18 @@ void follow(state_t *s) {
 	follow(s->out1);
 }
 
-void debug() {
-	printf("out_stack: %ld\n", out_ptr-out_stack);
+void debug(regex_t *f) {
+	printf("\nout_stack: %ld\n", out_ptr-out_stack);
 	printf("op_stack: %ld\n", op_ptr-op_stack);
-	fragment_t f = POP_OUT();
 
-	printf("fragment: s: %p; outlist", (void*)f.s);
-	out_list_t *next, *curr = f.out;
+	printf("fragment: s: %p; outlist\n", (void*)f->s);
+	out_list_t *next, *curr = f->out;
 	for (;curr;curr=next){
 		next = curr->next;
-		printf("->%p", (void*)curr);
+		printf("->%p\n", (void*)curr);
 	}
-	printf("\n");
-	follow(f.s);
+	printf("done \n");
+	follow(f->s);
 }
 
 /*

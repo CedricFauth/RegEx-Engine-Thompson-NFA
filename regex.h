@@ -9,6 +9,6 @@ typedef union out_list out_list_t;
 regex_t *create_regex(char *r);
 void delete_regex(regex_t *r);
 
-void debug();
+void debug(regex_t *f);
 
 #endif
