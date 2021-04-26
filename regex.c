@@ -19,7 +19,7 @@ enum OP {
 	OP_CLOSE_P=	-51		//	)
 };
 
-int8_t precedence(int8_t op) {
+int_fast8_t precedence(int_fast8_t op) {
 	if (op == -1) return 10;			// match
 	else if (op >= OP_ZORO) return 5;	// * + ?
 	else if (op == OP_CONCAT) return 4;	// concat
@@ -44,8 +44,15 @@ struct fragment {
 	out_list_t *out;
 };
 
+struct regex_t {
+	fragment_t f;
+	unsigned n;
+	state_t *states[];
+};
+
 static fragment_t *out_ptr, out_stack[1000];
 static int_fast8_t *op_ptr, op_stack[1000];
+static state_t **state_ptr, *state_stack[1000];
 
 static bool no_concat;
 
@@ -55,15 +62,37 @@ static bool no_concat;
 #define POP_OP() *--op_ptr
 #define PEEK_OP() *(op_ptr-1)
 
+#define PUSH_STATE(x) *state_ptr++ = x
+#define POP_STATE() *--state_ptr
+
+bool isregcrtl(char c) {
+	if (c=='+'||c=='*'||c=='?'||c=='|') return true;
+	return false;
+}
+
 bool validate(char *r){
-	char *tmp = r;
+	char c, lastc = 0, *tmp = r;
+	int open_close = 0;
 	if (*r != '/') return false; 	// regex starts with '/'
 	if (*++r == '/') return false; 	// regex is not "//"
-	++r;
-	while (*r && (*r != '/' || *(r-1) == '\\')) ++r; // go to next '/'; ignore '\/'
+	// go to next '/'; ignore '\/'
+	while (*r && (*r != '/' || lastc == '\\')) {
+		c = *r;
+		debugf("%c\n",c);
+		if (isregcrtl(c) && (!lastc||isregcrtl(lastc))){
+			debugf("%c %d\n", c, lastc);
+			if (!(c=='|' && lastc!='|')) return false;
+		}
+		if (isregcrtl(c) && lastc == '(') return false;
+		if (c=='(') ++open_close;
+		else if (c == ')') --open_close;
+		if (open_close < 0) return false;
+		lastc = c;
+		++r;
+	}
 	if (!*r) return false;			// pos not '\0' but '/'
 	if (*(r+1)) return false;		// next pos is end '\0'
-	printf("found regex of len: %ld\n", r-tmp-1);
+	debugf("found regex of len: %ld\n", r-tmp-1);
 	return true;
 }
 
@@ -73,6 +102,7 @@ state_t *new_state(int_fast8_t sym, state_t *o, state_t *o1) {
 	s->out = o;
 	s->out1 = o1;
 	s->listid = 0;
+	PUSH_STATE(s);	// push state address on local stack
 	return s;
 }
 
@@ -100,71 +130,64 @@ void patch(out_list_t *l, state_t *out) {
 	for (; l; l=next) {
 		next = l->next;
 		l->s = out;
-		printf("patching out %p to %p\n", (void*)&l->s, (void*)out);
-		printf("now patched to %p\n", (void*)l->s);
+		debugf("patching out %p to %p\n", (void*)&l->s, (void*)out);
+		debugf("now patched to %p\n", (void*)l->s);
 	}
 }
 
-
-/*
-
-/a|(bc)/
-
-*/
-
 void print_frag(fragment_t *f) {
-	printf("print_frag: s: %p; outlist", (void*)f->s);
+	debugf("print_frag: s: %p; outlist", (void*)f->s);
 	out_list_t *next, *curr = f->out;
 	for (;curr;curr=next){
 		next = curr->next;
-		printf("->%p", (void*)curr);
+		debugf("->%p", (void*)curr);
 	}
 	
 }
 
 void merge() {
-	for (int i = 0; i < 10; ++i) printf("%d ", op_stack[i]);
-	int8_t last_op = POP_OP();
+	for (int i = 0; i < 10; ++i) debugf("%d ", op_stack[i]);
+	int_fast8_t last_op = POP_OP();
 	state_t *s;
 	fragment_t f1, f2;
 	switch (last_op) {
 	case OP_MATCH:
 		f1 = POP_OUT();
 		s = new_state(OP_MATCH, NULL, NULL);
-		printf("final state: %p\n", (void*)s);
+		debugf("final state: %p\n", (void*)s);
 		patch(f1.out, s);
 		PUSH_OUT(new_frag(f1.s, NULL));
 		break;
 	case OP_CONCAT:
-		printf("OP_CONCAT\n");
+		debugf("OP_CONCAT\n");
 		f2 = POP_OUT();
 		f1 = POP_OUT();
 		patch(f1.out, f2.s);
 		PUSH_OUT(new_frag(f1.s, f2.out));
 		break;
 	case OP_OR:
-		printf("OP_OR\n");
+		debugf("OP_OR\n");
 		f2 = POP_OUT();
 		f1 = POP_OUT();
 		s = new_state(OP_OR, f1.s, f2.s);
 		PUSH_OUT(new_frag(s, append(f1.out, f2.out)));
 		break;
 	case OP_OORM:
-		printf("OP_OORM +\n");
+		debugf("OP_OORM +\n");
 		f1 = POP_OUT();
 		s = new_state(OP_OORM, f1.s, NULL);
 		patch(f1.out, s);
 		PUSH_OUT(new_frag(f1.s, new_list(&s->out1)));
 		break;
 	case OP_ZORM:
-		printf("OP_ZORM *\n");
+		debugf("OP_ZORM *\n");
 		f1 = POP_OUT();
 		s = new_state(OP_ZORM, f1.s, NULL);
 		patch(f1.out, s);
 		PUSH_OUT(new_frag(s, new_list(&s->out1)));
 		break;
 	case OP_ZORO:
-		printf("OP_ZORO ?\n");
+		debugf("OP_ZORO ?\n");
 		f1 = POP_OUT();
 		s = new_state(OP_ZORO, f1.s, NULL);
 		PUSH_OUT(new_frag(s, append(f1.out, new_list(&s->out1))));
@@ -175,21 +198,17 @@ void merge() {
 	}
 }
 
-void check_precedence(int8_t op) {
+void check_precedence(int_fast8_t op) {
 	while (op_ptr != op_stack 
 		&& precedence(PEEK_OP()) > precedence(op)) 
 	{
-		printf("merge: %d\n", PEEK_OP());
+		debugf("merge: %d\n", PEEK_OP());
 		merge();
 	}
 }
 
 void parse(char *r) {
 	if (!*r++) return; // *r != '\0' and r = r+1
-	
-	no_concat = true; // beginning: no concatination required
-	out_ptr = out_stack;
-	op_ptr = op_stack;
 
 	char c;
 	while ((c = *r++)) {
@@ -244,7 +263,7 @@ void parse(char *r) {
 				break;
 			}
 			if (no_concat || out_ptr == out_stack) {
-				printf("\nno_concat add_char\n");
+				debugf("\nno_concat add_char\n");
 			} else {
 				check_precedence(OP_CONCAT);
 				PUSH_OP(OP_CONCAT);
@@ -259,28 +278,41 @@ void parse(char *r) {
 
 regex_t *create_regex(char *r) {
 
-	if (!validate(r)) {
+	no_concat = true; // beginning: no concatination required
+	out_ptr = out_stack;
+	op_ptr = op_stack;
+	state_ptr = state_stack;
+
+	if (!validate(r)) { // validating input regex string
 		fprintf(stderr, "error: regex not valid.\n");
 		return NULL;
 	}
-	parse(r);
 
-	regex_t *reg = malloc(sizeof(*reg));
-	reg->s = out_stack->s;
-	reg->out = out_stack->out;
+	parse(r);	// generating NFA from string
 
-	debug(reg);
+	if (out_ptr-out_stack != 1) { // 
+		fprintf(stderr, "error: more than one fragment at end\n");
+		return NULL;
+	}
+
+	ssize_t num_states = state_ptr-state_stack;
+	regex_t *reg = malloc(sizeof(*reg) + num_states*sizeof(reg->states[0]));
+	debugf("size of states %zu*%lu\n", num_states, sizeof(reg->states[0]));
+
+	reg->f = POP_OUT();
+	reg->n = num_states;
+	for (int i = 0; i < num_states; i++) 
+		reg->states[i] = POP_STATE();
 
 	return reg;
 }
 
-void free_states(state_t *s) {
-	// TODO
-}
-
 void delete_regex(regex_t *r) {
 	if (!r) return;
-	free_states(r->s);
+	for (int i = 0; i < r->n; i++) {
+		debugf("free\n");
+		free(r->states[i]);
+	}
 	free(r);
 }
 
@@ -298,18 +330,18 @@ void follow(state_t *s) {
 	follow(s->out1);
 }
 
-void debug(regex_t *f) {
+void debug(regex_t *r) {
 	printf("\nout_stack: %ld\n", out_ptr-out_stack);
 	printf("op_stack: %ld\n", op_ptr-op_stack);
 
-	printf("fragment: s: %p; outlist\n", (void*)f->s);
-	out_list_t *next, *curr = f->out;
+	printf("fragment: s: %p; outlist\n", (void*)r->f.s);
+	out_list_t *next, *curr = r->f.out;
 	for (;curr;curr=next){
 		next = curr->next;
 		printf("->%p\n", (void*)curr);
 	}
 	printf("done \n");
-	follow(f->s);
+	follow(r->f.s);
 }
 
 /*

@@ -11,6 +11,9 @@ int main(int argc, char **argv) {
 	}
 
 	regex_t *reg = create_regex(argv[2]);
+
+	debug(reg);
+
 	delete_regex(reg);
 
 	exit(EXIT_SUCCESS);
