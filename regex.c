@@ -9,18 +9,18 @@ enum OP {
 	// + = * = ? > AND > |
 	// merge if last > current
 
-	OP_MATCH= 	-1,		// matches
-	OP_ZORM= 	-3,		// 	*	zero or more	
-	OP_OORM= 	-4,		// 	+	one or more
-	OP_ZORO= 	-5,		// 	?	zero or one
-	OP_CONCAT=	-10,	// 	ab 	concatination
-	OP_OR=	 	-15,	// 	| 	or
-	OP_OPEN_P= 	-50,	// 	(
+	OP_MATCH =	-1,		// matches
+	OP_ZORM =	-3,		// 	*	zero or more	
+	OP_OORM =	-4,		// 	+	one or more
+	OP_ZORO =	-5,		// 	?	zero or one
+	OP_CONCAT =	-10,	// 	ab 	concatination
+	OP_OR =		-15,	// 	| 	or
+	OP_OPEN_P =	-50,	// 	(
 	OP_CLOSE_P=	-51		//	)
 };
 
 int8_t precedence(int8_t op) {
-	if (op == -1) return -1;			// match
+	if (op == -1) return 10;			// match
 	else if (op >= OP_ZORO) return 5;	// * + ?
 	else if (op == OP_CONCAT) return 4;	// concat
 	else if (op == OP_OR) return 3;		// |
@@ -105,14 +105,6 @@ void patch(out_list_t *l, state_t *out) {
 	}
 }
 
-void add_char(char c) {
-	if (no_concat || out_ptr == out_stack) {
-		printf("\nno_concat add_char\n");
-	} else PUSH_OP(OP_CONCAT);
-	//
-	state_t *s = new_state(c, NULL, NULL);
-	PUSH_OUT(new_frag(s, new_list(&s->out)));
-}
 
 /*
 
@@ -184,7 +176,9 @@ void merge() {
 }
 
 void check_precedence(int8_t op) {
-	while (op_ptr != op_stack && precedence(PEEK_OP()) > precedence(op)) {
+	while (op_ptr != op_stack 
+		&& precedence(PEEK_OP()) > precedence(op)) 
+	{
 		printf("merge: %d\n", PEEK_OP());
 		merge();
 	}
@@ -248,8 +242,15 @@ void parse(char *r) {
 			if (!isalnum(c)) {
 				fprintf(stderr, "warning: ignoring unknown symbol: '%c'\n", c);
 				break;
-			};
-			add_char(c);
+			}
+			if (no_concat || out_ptr == out_stack) {
+				printf("\nno_concat add_char\n");
+			} else {
+				check_precedence(OP_CONCAT);
+				PUSH_OP(OP_CONCAT);
+			}
+			state_t *s = new_state(c, NULL, NULL);
+			PUSH_OUT(new_frag(s, new_list(&s->out)));
 			no_concat = false;
 			break;
 		}
